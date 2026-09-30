@@ -62,7 +62,14 @@ Each rule has a reason. Keep the reason when you explain a decision to the user.
     (no `fireAndForget`) returns after the handler has processed the event, so you can return the real
     resource. Use `fireAndForget: true` only when the user asks, or for write-only and remote-consumer
     events. A write timeout means the event is stored but not yet processed: do not retry the write.
-11. **Never invent APIs.** If an option or method is not in the installed library, say
+11. **A start error must never leave a silent stall.** Retry the whole start with teardown
+    (`stopPump()` then `stopCluster()`) between attempts, exit the process when the retries run out,
+    and exit when a leader holds the lease without a running pump. Serve liveness before the start.
+    Reason: the lease and the pump are separate. A pod that caught a `startPump()` error, or a new
+    leader whose bootstrap failed (`Failed to bootstrap leader runtime after becoming leader`), keeps
+    the lease with no pump, and no other pod can take over. Use the runtime in
+    [resilient-startup](references/resilient-startup.md) for every production virtual service.
+12. **Never invent APIs.** If an option or method is not in the installed library, say
     "I cannot verify that API" and offer a verified alternative. Known non-existent examples:
     `enableEncryption()`, field-level encryption, automatic key rotation, `getStatus()`.
 
@@ -88,14 +95,15 @@ virtual pathway registration. Any other value gives a single local pump and no r
 ```typescript
 import { z } from "zod" // zod 3 (peer dependency ^3.25.63)
 import {
+  type ClusterManager,
   createPostgresPathwayChunkStore,
   createPostgresPathwayCoordinator,
   createPostgresPathwayDeliveryStore,
   createPostgresPathwayState,
   createPostgresPumpStateManagerFactory,
-  ConsoleLogger,
   PathwaysBuilder,
 } from "@flowcore/pathways"
+import { pathwaysLogger } from "./pathways-logger" // see references/resilient-startup.md
 
 const connectionString = process.env.DATABASE_URL!
 const statePrefix = "orders_service" // one prefix per deployable sharing a database
@@ -114,7 +122,7 @@ export const pathways = new PathwaysBuilder({
   pathwayName: process.env.FLOWCORE_PATHWAY_NAME!, // distinct per environment
   pathwayLabels: { name: "Orders service", description: "Consumes order events" },
   autoProvision: { pathway: true }, // register the virtual pathway (skipped in development)
-  logger: new ConsoleLogger(), // default is NoopLogger, which hides every log line below
+  logger: pathwaysLogger, // from references/resilient-startup.md; the default NoopLogger hides everything
 })
   .withPathwayState(createPostgresPathwayState({ connectionString, statePrefix }))
   .withPathwayChunkStore(createPostgresPathwayChunkStore({ connectionString, statePrefix }))
@@ -138,10 +146,14 @@ export const pathways = new PathwaysBuilder({
     await ordersReadModel.upsert(event.payload)
   })
 
-export async function startPathways() {
+// ONE start attempt. Never call it directly with a bare `.catch()`: run it through
+// startPathways() in references/resilient-startup.md, which retries with teardown, exits when the
+// retries run out, and watches the leader. Serve HTTP liveness first, then `void startPathways()`.
+export async function startOnce(): Promise<ClusterManager | null> {
+  let cluster: ClusterManager | null = null
   if (isProduction) {
     const coordinator = await createPostgresPathwayCoordinator({ connectionString }, { statePrefix })
-    await pathways.startCluster({
+    cluster = await pathways.startCluster({
       coordinator,
       advertisedAddress: process.env.POD_IP!, // host only; the library builds ws://host:port
       port: 9090,
@@ -151,11 +163,7 @@ export async function startPathways() {
     stateManagerFactory: await createPostgresPumpStateManagerFactory({ connectionString, statePrefix }),
     notifier: { type: "websocket" },
   })
-}
-
-export async function stopPathways() {
-  await pathways.stopPump()
-  await pathways.stopCluster()
+  return cluster
 }
 
 // In a request handler (same app handles the event):
@@ -173,8 +181,10 @@ export async function recordExport(orderId: string, target: string) {
 }
 ```
 
-`ordersReadModel` stands for your own persistence code. In real code, pass an adapter to your own
-logger that implements the library `Logger` interface (`debug`, `info`, `warn`, `error`).
+`ordersReadModel` stands for your own persistence code. Give the handler a timeout (see
+[resilient-startup](references/resilient-startup.md#handler-timeout)); a handler that never settles
+blocks its pump group. The logger adapter must log `message`, `name` and `stack` of errors and must
+keep the leader-bootstrap fatal detection.
 
 ## Verification checklist
 
@@ -193,7 +203,12 @@ Run these before you call the work done.
 - [ ] Events flow: an awaited `pathways.write()` returns without timeout and the read model changes.
       To inspect stored events use MCP `get_time_buckets`, then `get_events` with the event type id.
 - [ ] Generated ORM migrations contain no `pathway_` tables (grep the SQL).
-- [ ] Graceful shutdown calls `stopPump()` then `stopCluster()`.
+- [ ] Graceful shutdown calls `stopPump()` then `stopCluster()`, once.
+- [ ] Production start goes through the resilient runtime: no bare `startPathways().catch(...)`, retry
+      with teardown, exit after the last attempt, leader watchdog, fatal detection in the logger.
+- [ ] Liveness does not depend on pathways; readiness reports the pathways status.
+- [ ] Failure test: stop the database during boot, and delete the leader pod. The start either
+      recovers or the pod exits. No pod stays Ready as leader without a running pump.
 
 ## API keys and IAM
 
@@ -211,6 +226,9 @@ every other id is a full UUID. Use the `flowcore-iam` skill for policies, roles 
   pump, `statePrefix`, notifiers, concurrency and pump groups, pause and resume, failure modes.
 - [references/schema-and-migrations.md](references/schema-and-migrations.md): library-owned
   tables, Drizzle `tablesFilter`, read-only mirrors, deploy-time migrations.
+- [references/resilient-startup.md](references/resilient-startup.md): the production start runtime
+  (retry with teardown, exit, leader watchdog, health endpoints, handler timeouts) and why the naive
+  start stalls.
 - [references/troubleshooting.md](references/troubleshooting.md): symptoms, causes and fixes.
 - [references/evaluation-scenarios.md](references/evaluation-scenarios.md): scenarios to test
   answers produced with this skill.

@@ -1,6 +1,6 @@
 {
   "name": "flowcore",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Flowcore MCP server plus skills for the platform model, IAM, Data Pathways and the @flowcore/pathways SDK.",
   "author": { "name": "Flowcore", "email": "support@flowcore.io", "url": "https://flowcore.io" },
   "homepage": "https://flowcore.io",

@@ -36,6 +36,28 @@ Must not include:
 - managed delivery as an automatic fallback
 - cluster mode inside Next.js or another serverless runtime
 
+## Resilient cluster start
+
+Input: "Our virtual pathway stopped delivering after a deploy, but all pods are healthy." or
+"Make the production start of this pathways service robust."
+
+Must include:
+- the cause: a leader holds the lease without a running pump, after a caught `startPump()` error or
+  a failed leader bootstrap (`Failed to bootstrap leader runtime after becoming leader`)
+- immediate recovery: delete the leader pod, then check pulses with `get_data_pathway` /
+  `show_pathway_dashboard`
+- a start that retries with `stopPump()` + `stopCluster()` between attempts and exits after the last
+  attempt
+- a leader watchdog and fatal detection in the logger adapter
+- liveness independent of pathways, readiness that reports the pathways status
+- error logs with `message`, `name` and `stack`, and a handler timeout
+
+Must not include:
+- `startPathways().catch(console.error)` or any start error that is only logged
+- a retry that calls `startCluster()` again without `stopCluster()`
+- `pathways.pump?.isRunning` as the only health signal
+- disabling or switching the pathway to managed to make delivery work
+
 ## Serverless production target
 
 Input: "Deploy the consumer to Vercel."

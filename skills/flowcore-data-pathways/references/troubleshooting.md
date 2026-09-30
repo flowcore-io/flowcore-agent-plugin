@@ -10,6 +10,7 @@ Start every diagnosis read-only: `get_data_pathway`, then `show_pathway_dashboar
 | Right event types | Compare `virtualConfig.flowTypes` (virtual) or `config.sources[].eventTypes` (managed) with the event types that actually receive events (`get_time_buckets`) |
 | Events exist | `get_time_buckets` + `get_events` for the event type |
 | Virtual: service running | The consumer's pump runs only on the cluster leader. Ask the user for the service logs and leader state. |
+| Virtual: no pulses, pods healthy | The leader holds the lease without a running pump (a caught start error, or `Failed to bootstrap leader runtime after becoming leader`). Delete the leader pod to recover. Then fix the service start with the `flowcore-pathways` skill (`references/resilient-startup.md`). |
 | Managed: endpoint reachable | The endpoint must be public HTTPS and accept the configured auth headers |
 | Permissions | The pathway or service API key needs `fetch` on the data core (see `flowcore-iam`) |
 

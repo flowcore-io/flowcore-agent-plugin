@@ -5,6 +5,12 @@ hides every message quoted here.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| Pods are Ready and `pathways.write()` succeeds, but nothing is processed; the pathway shows stale or no pulses | The leader holds the lease without a running pump: the app caught a `startPump()` error, or a new leader logged `Failed to bootstrap leader runtime after becoming leader` | Find the leader (`Acquired leader lease` in the logs) and delete that pod to recover now. Then adopt [resilient-startup](resilient-startup.md) so a failed start retries with teardown and ends in an exit. |
+| `Cluster already started` on a start retry | The retry calls `startCluster()` again after a failed start | Call `stopPump()` and `stopCluster()` before every retry, or use [resilient-startup](resilient-startup.md). |
+| Error logs show `{}` or `error: {}` | The app logs `{ error }`; `Error` fields are not enumerable | Log `message`, `name` and `stack` explicitly (see `describeError` in [resilient-startup](resilient-startup.md)). |
+| One pump group stops while the others continue, and no error repeats | A handler never settles | Add a handler timeout and client timeouts. See [resilient-startup](resilient-startup.md#handler-timeout). |
+| Events are skipped after handler errors, with `Failed N events` in the logs | The handler threw on every retry and every redelivery (`maxRetries` and `maxRedeliveryCount`, default 3 each), so the data pump dropped the event | Fix the handler, record failures with `onAnyError`, and replay with the control plane if needed. |
+| Production behaves like development under Bun | Bun inlined `NODE_ENV` at build time | Read the runtime mode from a variable Bun does not inline, or set `runtimeEnv` explicitly. |
 | `Cluster mode must be started before production virtual pump startup` | Production + virtual without `startCluster()` | Call `startCluster()` before `startPump()`. On serverless, stop and ask the user (long-running service or managed). |
 | Production never runs a local pump and logs `Not starting local pump — production managed pathways rely on control-plane delivery` | `pathwayMode` not set; production defaults to `managed` | Set `pathwayMode: "virtual"` unless the user chose managed. |
 | `managedConfig.endpointUrl is required when provisioning a managed pathway` | Managed registration without an endpoint | Add `managedConfig`, or set `pathwayMode: "virtual"`. |
