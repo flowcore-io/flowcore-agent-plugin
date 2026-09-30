@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "flowcore",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Connects coding agents to the Flowcore event platform and teaches them to operate it: the resource hierarchy, IAM policies that actually match, virtual and managed Data Pathways, and building apps with the @flowcore/pathways SDK.",
   "author": {
     "name": "Flowcore",

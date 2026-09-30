@@ -29,14 +29,18 @@ await pathways.startPump({ stateManagerFactory, notifier: { type: "websocket" } 
 In production + virtual, `startPump()` without an active cluster throws
 `Cluster mode must be started before production virtual pump startup`.
 
-Shutdown:
+This is one attempt. In production run it through the runtime in
+[resilient-startup](resilient-startup.md): retry with `stopPump()` + `stopCluster()` between attempts,
+exit when the retries run out, and exit when a leader has no running pump. Two library facts make
+this necessary:
 
-```typescript
-process.on("SIGTERM", async () => {
-  await pathways.stopPump()
-  await pathways.stopCluster()
-})
-```
+- A failed `startCluster()` leaves the cluster manager in place. A second call throws
+  `Cluster already started` until `stopCluster()` runs.
+- The lease is not tied to the pump. A leader whose pump start or bootstrap failed keeps renewing the
+  lease, and no other instance can take over.
+
+Shutdown, once: `await pathways.stopPump()` then `await pathways.stopCluster()`. `stopCluster()`
+releases the lease when this instance leads.
 
 ## `startCluster(options)` (`PathwayClusterOptions`)
 
@@ -147,5 +151,9 @@ ignored (all pumps are reset, with a warning).
 | Leader crashes | Lease expires after `leaseTtlMs`; another instance takes over from the saved cursor. |
 | Follower crashes | Dropped after `staleThresholdMs`; events go to the remaining instances. |
 | No followers | Leader processes events itself. |
-| PostgreSQL unavailable | Lease renewal fails, the leader steps down and stops its pump. No instance leads until the database is back. |
+| PostgreSQL unavailable | Lease renewal throws. The error is logged as `Lease loop error` and the leader keeps its role. No other instance can acquire the lease until the database is back. |
+| `startPump()` throws on the leader, and the app continues | The leader keeps the lease with no pump. Delivery stops for the whole cluster. Prevent it with [resilient-startup](resilient-startup.md). |
+| A new leader fails its bootstrap | Logged as `Failed to bootstrap leader runtime after becoming leader`. No retry and no lease release. Same stall. The runtime in [resilient-startup](resilient-startup.md) exits on it. |
+| A data pump group fails after a successful start | The library restarts that group with backoff (1 s doubling to 30 s, without limit). The other groups continue. |
+| Handler never settles | Its pump group stops delivery. Give handlers a timeout. |
 | Network partition | Two leaders are possible for up to `leaseTtlMs`. Keep handlers idempotent. |
