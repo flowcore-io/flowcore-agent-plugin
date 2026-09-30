@@ -1,0 +1,116 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+
+      # Schema conformance, skill frontmatter, path containment, symlink safety,
+      # credential patterns, private identifiers, manifest/doc consistency.
+      - name: Validate package
+        run: node scripts/validate-package.mjs
+
+      - name: Validator self-test
+        run: node tests/smoke/validator.test.mjs
+
+      # Guards against a new file silently entering a published artifact.
+      - name: Verify release archive contents
+        run: node scripts/build-release.mjs --verify
+
+      - name: Verify reproducible build
+        run: |
+          node scripts/build-release.mjs > /dev/null
+          FIRST=$(sha256sum dist/*.tar.gz | cut -d' ' -f1)
+          rm -rf dist
+          node scripts/build-release.mjs > /dev/null
+          SECOND=$(sha256sum dist/*.tar.gz | cut -d' ' -f1)
+          if [ "$FIRST" != "$SECOND" ]; then
+            echo "Build is not reproducible: $FIRST != $SECOND"
+            exit 1
+          fi
+          echo "Reproducible: $FIRST"
+
+  secrets:
+    name: Credential scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # A credential must never reach a public package. mcp.json is URL-only by
+      # design; authentication is client-managed OAuth 2.1.
+      - name: Assert mcp.json declares no credentials
+        run: |
+          if [ ! -f mcp.json ]; then
+            echo "No mcp.json; nothing to check."
+            exit 0
+          fi
+          for field in headers env token bearer authorization client_secret api_key apiKey password; do
+            if grep -qi "\"${field}\"" mcp.json; then
+              echo "mcp.json must not declare \"${field}\" — credentials are client-managed."
+              exit 1
+            fi
+          done
+          echo "mcp.json is credential-free."
+
+      - name: Scan history for credential patterns
+        run: |
+          PATTERNS='sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|fc_[A-Za-z0-9]{8,}_[A-Za-z0-9]{8,}'
+          if git grep -nIE "$PATTERNS" -- ':!scripts/validate-package.mjs' ':!.github/workflows/validate.yml'; then
+            echo "Potential credential found in tracked files."
+            exit 1
+          fi
+          echo "No credential patterns in tracked files."
+
+  links:
+    name: Documentation links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Relative links only; external links are checked out of band to avoid
+      # flaky failures from third-party outages.
+      - name: Check relative links resolve
+        run: |
+          status=0
+          while IFS= read -r file; do
+            while IFS= read -r target; do
+              [ -z "$target" ] && continue
+              case "$target" in http*|mailto:*|\#*) continue ;; esac
+              clean="${target%%#*}"
+              [ -z "$clean" ] && continue
+              resolved="$(dirname "$file")/$clean"
+              if [ ! -e "$resolved" ]; then
+                echo "$file: broken link -> $target"
+                status=1
+              fi
+            done < <(grep -oE '\]\([^)]+\)' "$file" | sed -E 's/^\]\(//; s/\)$//')
+          done < <(find . -name '*.md' -not -path './node_modules/*' -not -path './.git/*')
+          exit $status

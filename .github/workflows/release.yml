@@ -1,0 +1,135 @@
+name: Release
+
+# Releases publish only from tags on this repository. Never from a fork or a
+# pull-request context, where an attacker could influence the artifact.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Reject non-repository trigger
+        if: github.repository != 'flowcore-io/flowcore-agent-plugin'
+        run: |
+          echo "Releases publish only from flowcore-io/flowcore-agent-plugin."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+
+      - name: Resolve version
+        id: version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          MANIFEST=$(node -p "require('./plugin.json').version")
+          if [ "$VERSION" != "$MANIFEST" ]; then
+            echo "Tag $TAG implies version $VERSION but plugin.json declares $MANIFEST."
+            exit 1
+          fi
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Re-run every gate at release time; a passing PR is not sufficient
+      # evidence for the artifact actually being published.
+      - name: Validate package
+        run: node scripts/validate-package.mjs
+
+      - name: Validator self-test
+        run: node tests/smoke/validator.test.mjs
+
+      - name: Require changelog entry
+        run: |
+          if ! grep -qE "^## \[?${{ steps.version.outputs.version }}\]?" CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for ${{ steps.version.outputs.version }}."
+            exit 1
+          fi
+
+      - name: Build release archive
+        run: node scripts/build-release.mjs
+
+      - name: Verify checksum
+        working-directory: dist
+        run: |
+          sha256sum -c "flowcore-agent-plugin-${{ steps.version.outputs.version }}.tar.gz.sha256"
+          echo "--- Archive contents ---"
+          tar -tzf "flowcore-agent-plugin-${{ steps.version.outputs.version }}.tar.gz"
+
+      - name: Assert archive ships no executable code
+        working-directory: dist
+        run: |
+          if tar -tzf "flowcore-agent-plugin-${{ steps.version.outputs.version }}.tar.gz" \
+             | grep -E '\.(mjs|js|cjs|ts|sh|py|rb|exe|bin)$'; then
+            echo "Release archive must contain only Markdown and JSON."
+            exit 1
+          fi
+          echo "No executable code in archive."
+
+      - name: Generate release notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          {
+            echo "## Flowcore Agent Plugin ${VERSION}"
+            echo
+            echo "Agent Plugins \`1.0.0\` package. Contains Markdown skills and JSON configuration only — no executable code, no dependencies, no credentials."
+            echo
+            echo "### Verify the artifact"
+            echo
+            echo '```bash'
+            echo "shasum -a 256 -c flowcore-agent-plugin-${VERSION}.tar.gz.sha256"
+            echo '```'
+            echo
+            echo "SHA-256: \`$(cut -d' ' -f1 "dist/flowcore-agent-plugin-${VERSION}.tar.gz.sha256")\`"
+            echo
+            echo "### Install"
+            echo
+            echo "See [installation](https://github.com/flowcore-io/flowcore-agent-plugin/blob/v${VERSION}/docs/installation.md) and [authentication](https://github.com/flowcore-io/flowcore-agent-plugin/blob/v${VERSION}/docs/authentication.md). Client compatibility: [supported clients](https://github.com/flowcore-io/flowcore-agent-plugin/blob/v${VERSION}/docs/supported-clients.md)."
+            echo
+            echo "### Security"
+            echo
+            echo "Authentication is client-managed OAuth 2.1; no credentials ship in this package. Agent Plugins \`1.0.0\` defines no trust model, so schema conformance is not a safety property — see the [threat model](https://github.com/flowcore-io/flowcore-agent-plugin/blob/v${VERSION}/docs/threat-model.md)."
+            echo
+            echo "### Changelog"
+            echo
+            awk "/^## \\[?${VERSION}\\]?/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md
+          } > release-notes.md
+          cat release-notes.md
+
+      # gh is preinstalled on GitHub runners, so no third-party action to pin.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "v${VERSION}" \
+            --notes-file release-notes.md \
+            $([ "${VERSION%%.*}" = "0" ] && echo --prerelease) \
+            "dist/flowcore-agent-plugin-${VERSION}.tar.gz" \
+            "dist/flowcore-agent-plugin-${VERSION}.tar.gz.sha256"

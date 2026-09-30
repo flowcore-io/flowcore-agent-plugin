@@ -1,0 +1,33 @@
+# Build output
+dist/
+*.tar.gz
+*.tar.gz.sha256
+*.sbom.json
+
+# Node
+node_modules/
+
+# Local agent state
+.claude/
+.codex/
+.cursor/
+
+# .agents holds local state AND the committed Codex marketplace descriptor.
+# The trailing /* matters: git cannot re-include a path whose parent DIRECTORY
+# is excluded, so ".agents/" plus "!.agents/plugins/" would silently fail.
+.agents/*
+!.agents/plugins/
+
+# Environment — must never be committed
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp

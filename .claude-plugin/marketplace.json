@@ -1,0 +1,14 @@
+{
+  "name": "flowcore",
+  "description": "Flowcore agent plugin: MCP server and skills for the Flowcore event platform.",
+  "owner": { "name": "Flowcore", "email": "support@flowcore.io", "url": "https://flowcore.io" },
+  "plugins": [
+    {
+      "name": "flowcore",
+      "source": "./",
+      "description": "Operate Flowcore data cores, IAM and Data Pathways, and build apps with @flowcore/pathways.",
+      "version": "0.1.0",
+      "author": { "name": "Flowcore" }
+    }
+  ]
+}

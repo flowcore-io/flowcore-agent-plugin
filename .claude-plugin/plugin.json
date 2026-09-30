@@ -1,0 +1,10 @@
+{
+  "name": "flowcore",
+  "version": "0.1.0",
+  "description": "Flowcore MCP server plus skills for the platform model, IAM, Data Pathways and the @flowcore/pathways SDK.",
+  "author": { "name": "Flowcore", "email": "support@flowcore.io", "url": "https://flowcore.io" },
+  "homepage": "https://flowcore.io",
+  "repository": "https://github.com/flowcore-io/flowcore-agent-plugin",
+  "license": "MIT",
+  "keywords": ["flowcore", "event-sourcing", "mcp", "iam", "data-pathways"]
+}

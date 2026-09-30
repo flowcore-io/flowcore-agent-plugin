@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "flowcore": {
+      "type": "http",
+      "url": "https://flowcore.io/api/mcp",
+      "oauth": {
+        "clientId": "flowcore-mcp",
+        "scopes": ["openid", "profile", "email", "flowcore_user", "offline_access"]
+      }
+    }
+  }
+}

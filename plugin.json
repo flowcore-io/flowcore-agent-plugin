@@ -1,0 +1,32 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "flowcore",
+  "version": "0.1.0",
+  "description": "Connects coding agents to the Flowcore event platform and teaches them to operate it: the resource hierarchy, IAM policies that actually match, virtual and managed Data Pathways, and building apps with the @flowcore/pathways SDK.",
+  "author": {
+    "name": "Flowcore",
+    "email": "support@flowcore.io",
+    "url": "https://flowcore.io"
+  },
+  "homepage": "https://flowcore.io",
+  "repository": "https://github.com/flowcore-io/flowcore-agent-plugin",
+  "license": "MIT",
+  "keywords": ["flowcore", "event-sourcing", "mcp", "agent-skills", "iam", "data-pathways", "pathways"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Flowcore",
+        "shortDescription": "Operate Flowcore data cores, IAM and Data Pathways from your agent.",
+        "longDescription": "Adds the Flowcore MCP server and four skills: the platform model and safety rules, IAM with the only valid policy format, Data Pathway operations (virtual by default), and building event-driven apps with the @flowcore/pathways SDK.",
+        "developerName": "Flowcore",
+        "category": "Developer Tools",
+        "websiteURL": "https://flowcore.io",
+        "composerIcon": "./assets/flowcore-icon.svg",
+        "logo": "./assets/flowcore-icon.svg",
+        "defaultPrompt": ["List my Flowcore tenants and summarize what is in each"],
+        "capabilities": [],
+        "screenshots": []
+      }
+    }
+  }
+}
